@@ -11,221 +11,253 @@ import (
 )
 
 const (
-	CHECK_FILE = "[:~:-file-:~:]"
-	CHECK_NAME = "[:~:-name-:~:]"
-
 	PRTCL_TCP = "tcp"
 	DNS       = "8.8.4.4:8888"
 
-	EXT     = "--exit"
-	SRT_EXT = "-q"
-	HST     = "--host"
-	SRT_HST = "-h"
+	EXIT       = "--exit"
+	SHORT_EXIT = "-q"
+	HOST       = ":connect"
 
-	SPRTR = "->"
-	BUFF  = 1024
+	SEPARATE = " "
+	BUFF     = 1024
 )
 
 var (
-	g_cnctd     bool   = false
-	g_mn_prt    string = ":9090"
-	g_mdplc     string = "..."
-	g_strg      string = "disk"
-	g_hst       string = "127.0.0.1"
-	g_snd_to_ip        = []string{g_hst}
-	g_sz_conn   uint16 = 0
-	g_path      string = "/src/go/redisgolang/redisgo_server/Info.txt"
+	g_connected   bool   = true
+	g_port        string = ":9090"
+	g_modememory  string = "..."
+	g_def_ip_port string = "127.0.0.1"
+	g_con_to_ip          = []string{g_def_ip_port + g_port}
+	g_sz_conn     uint16 = 0
+	g_path        string = "Info.txt"
 )
 
-type Nero struct {
-	Hits []string
-	Rslt chan string
+type ServerFlds struct {
+	HandFlds []string
+	Rslt     chan string
 }
 
-//Главная горутина
 func main() {
-	inpt_rgs(os.Args)
-	srv_pos()
+	fmt.Println("1:main start")
+	inptArgsCheck(os.Args)
+	fmt.Println("2:inptArgsCheck end/ServFunc start")
+	ServFunc()
+	fmt.Println("3:end of main")
 }
 
 //Функция проверяет входные аргументы и определяет порт
-func inpt_rgs(args []string) {
+func inptArgsCheck(args []string) {
 	var (
 		host bool = false
 		mode bool = false
 		port bool = false
 	)
+	fmt.Println("4: 'for' args start")
 	for _, value := range args[1:] {
 		if port {
-			g_mn_prt = ":" + value
+			fmt.Println("4.1: 'port' args start")
+			g_port = ":" + value
 			port = false
 			continue
 		}
 		if mode {
-			g_mdplc = value
+			fmt.Println("4.2: 'mode' args start")
+			g_modememory = value
 			mode = false
 			continue
 		}
 		if host {
-			g_hst = value
+			fmt.Println("4.3: 'host' args start")
+			g_def_ip_port = value
 			host = false
 			continue
 		}
 		switch value {
 		case "-p", "--port":
+			fmt.Println("4.4: 'portcs' args start")
 			port = true
 		case "-m", "--mode":
+			fmt.Println("4.5: 'modecs' args start")
 			mode = true
 		case "-h", "--host":
+			fmt.Println("4.5: 'hostcs' args start")
 			mode = true
 		}
 	}
+	fmt.Println("5: 'for' args end")
 }
 
 // Функция сервера содержащая в себе и функционал клиента
-func srv_pos() {
-	var (
-		buffer  []byte = make([]byte, BUFF)
-		splited []string
-		content string = ""
-	)
-	go cliPos()
-	fmt.Println("Launching server...")
-	fmt.Printf("Port->%s\n", g_mn_prt)
-	li, err := net.Listen(PRTCL_TCP, g_mn_prt)
+func ServFunc() {
+	fmt.Println("6: Launching server...")
+	fmt.Printf("Port->%s\n", g_port)
+	li, err := net.Listen(PRTCL_TCP, g_port)
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Println("Server is listenning.")
-	Combos := make(chan Nero)
-	go srvrRds_go(Combos)
+	defer li.Close()
+	defer fmt.Println("6: li.Close.")
+	fmt.Println("7: Server is listenning.")
+
+	fmt.Println("8: 'go' cliPos start")
+	fmt.Println("8.1:Entered with :" + g_def_ip_port + g_port)
+	go ClientFunc()
+
 	for {
 		conn, err := li.Accept()
+		fmt.Println("9: conn := li.Accept()")
 		if err != nil {
 			log.Fatal(err)
 		}
-		go hndlFnc(Combos, conn)
+		ServConnCh := make(chan ServerFlds)
+		defer conn.Close()
+		defer fmt.Println("9: conn.Close.")
+		go ConnInputHandler(ServConnCh, conn)
+		fmt.Println("9.1: end ConnInputHandler")
+		go ServCmndsHandler(ServConnCh)
+		fmt.Println("9.2: end ServCmndsHandler")
+		//buffer := make([]byte, BUFF)
+		//content := ""
+		//fmt.Println("9.3: strt conn.Read(buffer)")
+		//for {
+		//	fmt.Println("9.4: 'for' conn.Read(buffer)")
+		//	length, err := conn.Read(buffer)
+		//	if err != nil || length == 0 {
+		//		break
+		//	}
+		//	content += string(buffer[:length])
+		//}
+		//fmt.Println("Print content: ", content)
 	}
 }
 
-//Оснавная нагрузка описана здесь
-func srvrRds_go(Combos chan Nero) {
-	var dict = make(map[string]string)
-	for cmbs := range Combos {
-		if len(cmbs.Hits) < 2 {
-			cmbs.Rslt <- "At least 2 arguments for start"
-			continue
-		}
-
-		//fmt.Println("GOT Nero", cmbs)
-
-		switch strings.ToUpper(cmbs.Hits[0]) {
-		//GET <key>
-		case "GET":
-			if len(cmbs.Hits) != 2 {
-				cmbs.Rslt <- "Gimme key"
-			}
-			key := cmbs.Hits[1]
-			value := dict[key]
-			cmbs.Rslt <- value
-			//SET <key>
-		case "SET":
-			if len(cmbs.Hits) != 3 {
-				cmbs.Rslt <- "Missing value"
-			}
-			key := cmbs.Hits[1]
-			value := cmbs.Hits[2]
-			dict[key] = value
-			cmbs.Rslt <- " "
-			//DEL <KEY>
-		case "DEL":
-			key := cmbs.Hits[1]
-			delete(dict, key)
-			cmbs.Rslt <- " "
-		default:
-			cmbs.Rslt <- "I don't know this command :" + cmbs.Hits[0] + "\n"
-		}
-	}
-}
-
-func hndlFnc(Combos chan Nero, conn net.Conn) {
+//Ловит пришедщие данные и отправляет на обработку
+func ConnInputHandler(ServConnCh chan ServerFlds, conn net.Conn) {
+	fmt.Println("10: ConnInputHandler start")
 	defer conn.Close()
 	//Определяем обьект
 	scnnr := bufio.NewScanner(conn)
+	fmt.Println("11: scnnr conn")
 	for scnnr.Scan() {
-		ln := scnnr.Text()
-		fmt.Printf("scanner ln: %s", ln)
-		fs := strings.Fields(ln)
+		line := scnnr.Text()
+		fmt.Printf("12: scanner ln: %s\n", line)
+		inptFlds := strings.Fields(line)
 		rslt := make(chan string)
-		Combos <- Nero{
-			Hits: fs,
-			Rslt: rslt,
+		ServConnCh <- ServerFlds{
+			HandFlds: inptFlds,
+			Rslt:     rslt,
 		}
-		if g_mdplc != g_strg {
+		if g_modememory != "disk" {
+			fmt.Println("13:conn <-rslt")
 			io.WriteString(conn, <-rslt)
 		} else {
+			fmt.Println("14: storageFnc <-rslt")
 			storageFnc(rslt)
 		}
 	}
 }
 
-//client func and clisrv
-func cliPos() {
-	fmt.Println("Entered with :" + g_hst)
-	go redisCli()
+//Обрабатывает команды GET SET DEL, держит данные в cash or disk
+func ServCmndsHandler(ServConnCh chan ServerFlds) {
+	fmt.Println("15: 'ServCmndsHandler' strt")
+	var memData = make(map[string]string)
+	for traf := range ServConnCh {
+		if len(traf.HandFlds) < 2 {
+			traf.Rslt <- "11:At least 2 arguments for start"
+			continue
+		}
+
+		fmt.Println("15.1:GOT ServerFlds", traf)
+
+		switch traf.HandFlds[0] {
+		//GET <key>
+		case "GET":
+			fmt.Println("15.2 case GET")
+			if len(traf.HandFlds) != 2 {
+				traf.Rslt <- "Gimme key"
+			}
+			key := traf.HandFlds[1]
+			value := memData[key]
+			traf.Rslt <- value
+			//SET <key>
+		case "SET":
+			fmt.Println("15.3: case SET")
+			if len(traf.HandFlds) != 3 {
+				traf.Rslt <- "Missing value\n"
+			}
+			key := traf.HandFlds[1]
+			value := traf.HandFlds[2]
+			memData[key] = value
+			traf.Rslt <- " "
+			//DEL <KEY>
+		case "DEL":
+			fmt.Println("15.4: case DEL")
+			key := traf.HandFlds[1]
+			delete(memData, key)
+			traf.Rslt <- " "
+		default:
+			fmt.Println("15.5: case noCommand default")
+			traf.Rslt <- "I don't know this command :" + traf.HandFlds[0] + "\n"
+		}
+	}
 }
 
-//redisClient_go
-func redisCli() {
-	//cmmnd, _ := bufio.NewReader(os.Stdin).ReadString('\n')
-	//mssg := strings.Replace(cmmnd, "\n", "", -1)
-	//cmd := strings.Split(strings.Replace(mssg, " ", "", -1), SPRTR)
-	scanner := bufio.NewScanner(os.Stdin)
-	for scanner.Scan() {
-		scnln := scanner.Text()
-		fmt.Println(scnln)
-		scnfs := strings.Fields(scnln)
+//Клиентская функция обрабатывающая команды из командной строки
+func ClientFunc() {
+	fmt.Println("16: 'go' ClientFunc start")
+	scnnrCli := bufio.NewScanner(os.Stdin)
+	fmt.Println("17: 'os.Stdin NewScanner' ClientFunc start")
+	for scnnrCli.Scan() {
+		lineC := scnnrCli.Text()
+		fmt.Println("18:ClientFunc scnnrCli: ", lineC)
+		CliFlds := strings.Fields(lineC)
 
-		switch scnfs[0] {
+		switch CliFlds[0] {
 
-		case EXT, SRT_EXT:
-			fmt.Println("Exit client. Good day.")
+		case EXIT, SHORT_EXIT:
+			fmt.Println("19:Exit client. See ya.")
 			os.Exit(0)
 
-		case SRT_HST, HST:
-			if len(scnfs) == 2 {
-				var flg bool = false
-				for _, vle := range g_snd_to_ip {
-					if vle == scnfs[1] {
-						flg = true
+		case HOST:
+			if len(CliFlds) == 2 {
+				fmt.Println("20:case HOST")
+				var toggle bool = false
+				for _, addr := range g_con_to_ip {
+					if addr == CliFlds[1] {
+						toggle = true
 						break
 					}
 				}
-				if !flg {
-					conn, err := net.Dial(PRTCL_TCP, scnfs[1])
+				if toggle {
+					conn, err := net.Dial(PRTCL_TCP, CliFlds[1])
 					defer conn.Close()
+					fmt.Println("21:!toggle case HOST")
 					if err != nil {
-						g_snd_to_ip = append(g_snd_to_ip, scnfs[1])
+						g_con_to_ip = append(g_con_to_ip, CliFlds[1])
 						g_sz_conn++
-						g_cnctd = true
-						conn.Write([]byte(fmt.Sprintf("[User '%s:%s join']\n", g_hst, g_mn_prt)))
+						g_connected = true
+						fmt.Println("22:conn.Write! !toggle")
+						conn.Write([]byte(fmt.Sprintf("[User '%s:%s join']\n", g_def_ip_port, g_port)))
 					}
 				}
 			}
 		default:
-			if g_cnctd {
-				for indx, vle := range g_snd_to_ip {
-					conn, err := net.Dial(PRTCL_TCP, vle)
-					fmt.Println("Connected to: " + vle)
+			fmt.Println("23:default: g_connected")
+			if g_connected {
+				fmt.Println("24:default: g_connected=true")
+				for indx, addr := range g_con_to_ip {
+					conn, err := net.Dial(PRTCL_TCP, addr)
+					fmt.Println("25:Connected to: " + addr)
 					defer conn.Close()
 					if err != nil {
-						g_snd_to_ip = remove(g_snd_to_ip, indx)
+						g_con_to_ip = remove(g_con_to_ip, indx)
 						g_sz_conn--
 						if g_sz_conn == 0 {
-							g_cnctd = false
+							g_connected = false
 						}
 					} else {
-						conn.Write([]byte(fmt.Sprintf("[%s:%s]: %s\n", g_hst, g_mn_prt, scnfs)))
+						fmt.Println("26: 'default' ClientFunc mssg")
+						conn.Write([]byte(fmt.Sprintf("%s\n", lineC)))
 					}
 				}
 			}
@@ -235,21 +267,24 @@ func redisCli() {
 
 // функция записывающая информацию на диск
 func storageFnc(rslt chan string) error {
+	fmt.Println("27: 'storageFnc' strt")
 	//Существующий файл с таким же именем будут перезаписан
 	var fl, err = os.Create(g_path)
 	if err != nil {
 		panic(err)
 	}
 	defer fl.Close()
-	var byteWrttn, errWrt = fl.WriteString(<-rslt)
+	info := <-rslt
+	var byteWrttn, errWrt = fl.WriteString(info)
 	if errWrt != nil {
 		panic(errWrt)
 	}
-	fmt.Printf("Info.txt written: %v\n", byteWrttn)
+	fmt.Printf("28:Info.txt written: %v\n", byteWrttn)
 	return nil
 }
 
 //remove func
 func remove(list []string, num int) []string {
+	fmt.Println("29: 'remove' done")
 	return append(list[:num], list[num+1:]...)
 }
